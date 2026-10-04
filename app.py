@@ -1,12 +1,14 @@
 """
-FinVerify AI - Hallucination-Resistant Financial RAG System
+FinVerify AI - Hallucination-Resistant Financial Document Intelligence
+Powered by Local MiniLM + FAISS + Gemini / Groq + PatronusAI/financebench Benchmark
 Streamlit Application for Hackathon Demo
 """
 
 from __future__ import annotations
 import os
 import io
-from typing import List, Dict, Any, Tuple
+import time
+from typing import List, Dict, Any, Tuple, Optional
 import streamlit as st
 from dotenv import load_dotenv
 
@@ -22,6 +24,7 @@ from rag import (
     EMBEDDING_DIM,
 )
 from guardrail import EXACT_FALLBACK_ANSWER
+from financebench import FinanceBenchDataset
 
 # Page Configuration
 st.set_page_config(
@@ -31,7 +34,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Custom Styling for Hackathon Demo Polish
+# Custom Styling for Hackathon Demo Polish & Animations
 st.markdown(
     """
     <style>
@@ -81,12 +84,19 @@ st.markdown(
     @keyframes slideUpFade {
         from {
             opacity: 0;
-            transform: translateY(20px);
+            transform: translateY(18px);
         }
         to {
             opacity: 1;
             transform: translateY(0);
         }
+    }
+
+    /* Force horizontal continuous text wrapping across the app */
+    .stMarkdown, .stText, p, div, span {
+        white-space: normal !important;
+        word-break: normal !important;
+        overflow-wrap: break-word !important;
     }
 
     /* Hero Branding */
@@ -129,12 +139,12 @@ st.markdown(
         box-shadow: 0 8px 24px rgba(56, 189, 248, 0.25);
     }
     .metric-val {
-        font-size: 1.9rem;
+        font-size: 1.85rem;
         font-weight: 800;
         color: #38bdf8;
     }
     .metric-label {
-        font-size: 0.8rem;
+        font-size: 0.78rem;
         color: #94a3b8;
         text-transform: uppercase;
         letter-spacing: 0.08em;
@@ -191,6 +201,23 @@ st.markdown(
         margin: 16px 0;
         animation: cyberGlow 5s ease-in-out infinite, slideUpFade 0.5s ease-out;
         box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+        white-space: normal !important;
+        word-break: normal !important;
+        overflow-wrap: break-word !important;
+    }
+
+    /* Side-by-Side Comparison Container */
+    .benchmark-compare-box {
+        background: #0f172a;
+        border: 1px solid #334155;
+        border-radius: 12px;
+        padding: 20px;
+        margin-bottom: 16px;
+        transition: all 0.3s ease;
+    }
+    .benchmark-compare-box:hover {
+        border-color: #818cf8;
+        box-shadow: 0 8px 24px rgba(129, 140, 248, 0.2);
     }
 
     /* Wide Horizontal Citation Cards */
@@ -248,48 +275,41 @@ st.markdown(
     @keyframes patrolLeftEdge {
         0% {
             top: 18%;
-            transform: translateX(0px) rotate(-3deg);
+            transform: translateY(0px) rotate(0deg);
         }
         50% {
             top: 72%;
-            transform: translateX(8px) rotate(4deg);
+            transform: translateY(12px) rotate(3deg);
         }
         100% {
             top: 18%;
-            transform: translateX(0px) rotate(-3deg);
+            transform: translateY(0px) rotate(0deg);
         }
     }
-
     @keyframes thrusterFlicker {
-        0%, 100% { opacity: 0.6; height: 12px; }
-        50% { opacity: 1; height: 18px; filter: drop-shadow(0 0 8px #38bdf8); }
-    }
-
-    @keyframes eyeBlink {
-        0%, 90%, 100% { transform: scaleY(1); }
-        95% { transform: scaleY(0.1); }
+        0%, 100% { height: 16px; opacity: 0.8; }
+        50% { height: 26px; opacity: 1; filter: drop-shadow(0 0 10px #38bdf8); }
     }
 
     .bot-edge-left {
         position: fixed;
-        left: 14px;
+        left: 18px;
         top: 25%;
         z-index: 999999;
-        animation: patrolLeftEdge 13s ease-in-out infinite;
+        animation: patrolLeftEdge 18s ease-in-out infinite;
         cursor: pointer;
         display: flex;
         flex-direction: column;
         align-items: center;
-        transition: transform 0.2s ease;
+        transition: transform 0.25s ease;
     }
     .bot-edge-left:hover {
-        transform: scale(1.15) !important;
+        transform: scale(1.22) !important;
     }
     .bot-edge-left:hover .bot-speech {
         opacity: 1;
         transform: translateY(0) scale(1);
     }
-
     .bot-speech {
         opacity: 0;
         transform: translateY(6px) scale(0.9);
@@ -302,29 +322,26 @@ st.markdown(
         font-size: 0.76rem;
         font-weight: 700;
         white-space: nowrap;
-        position: absolute;
-        left: 64px;
-        top: 6px;
-        box-shadow: 0 4px 15px rgba(56, 189, 248, 0.4);
+        margin-bottom: 6px;
+        box-shadow: 0 4px 18px rgba(56, 189, 248, 0.4);
         pointer-events: none;
     }
-
     .bot-frame {
-        width: 52px;
-        height: 62px;
-        background: linear-gradient(145deg, #1e293b, #0f172a);
+        width: 48px;
+        height: 52px;
+        background: linear-gradient(135deg, #1e293b, #0f172a);
         border: 2px solid #38bdf8;
-        border-radius: 18px;
+        border-radius: 16px 16px 8px 8px;
         display: flex;
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        box-shadow: 0 0 20px rgba(56, 189, 248, 0.35);
+        box-shadow: 0 0 20px rgba(56, 189, 248, 0.45);
         position: relative;
     }
     .bot-antenna-dot {
-        width: 6px;
-        height: 6px;
+        width: 7px;
+        height: 7px;
         background: #34d399;
         border-radius: 50%;
         position: absolute;
@@ -336,17 +353,16 @@ st.markdown(
         height: 12px;
         background: #0284c7;
         border-radius: 8px;
-        box-shadow: 0 0 10px #38bdf8;
         display: flex;
         align-items: center;
         justify-content: space-around;
         padding: 0 3px;
-        animation: eyeBlink 3.5s infinite;
+        box-shadow: inset 0 0 6px #000000;
     }
     .bot-eye-glow {
         width: 6px;
         height: 6px;
-        background: #38bdf8;
+        background: #ffffff;
         border-radius: 50%;
         box-shadow: 0 0 6px #ffffff;
     }
@@ -503,100 +519,94 @@ st.markdown(
     .sparky-head-box {
         width: 58px;
         height: 52px;
-        background: linear-gradient(145deg, #1e1b4b, #0f172a);
+        background: linear-gradient(135deg, #1e293b 0%, #312e81 100%);
         border: 2px solid #818cf8;
         border-radius: 16px;
         display: flex;
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        box-shadow: 0 0 20px rgba(129, 140, 248, 0.4);
+        box-shadow: 0 8px 24px rgba(129, 140, 248, 0.45);
         position: relative;
     }
     .sparky-antenna {
-        width: 4px;
-        height: 8px;
+        width: 3px;
+        height: 10px;
         background: #818cf8;
         position: absolute;
-        top: -8px;
-        border-radius: 2px;
+        top: -10px;
     }
     .sparky-antenna-tip {
         width: 8px;
         height: 8px;
-        background: #38bdf8;
+        background: #fbbf24;
         border-radius: 50%;
         position: absolute;
-        top: -14px;
-        box-shadow: 0 0 10px #38bdf8;
+        top: -16px;
+        box-shadow: 0 0 10px #fbbf24;
     }
     .sparky-face-screen {
-        width: 42px;
-        height: 24px;
+        width: 44px;
+        height: 28px;
         background: #020617;
         border-radius: 8px;
         display: flex;
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        border: 1px solid #312e81;
+        gap: 3px;
     }
     .sparky-eyes-row {
         display: flex;
-        gap: 12px;
+        gap: 10px;
     }
     .sparky-eye {
-        width: 7px;
-        height: 7px;
+        width: 8px;
+        height: 8px;
         background: #38bdf8;
         border-radius: 50%;
         box-shadow: 0 0 8px #38bdf8;
-        animation: eyeBlink 4s infinite;
     }
     .sparky-smile {
         width: 14px;
         height: 3px;
-        border-bottom: 2px solid #34d399;
-        border-radius: 0 0 4px 4px;
-        margin-top: 3px;
+        background: #34d399;
+        border-radius: 2px;
     }
     .sparky-waving-hand {
         position: absolute;
-        right: -12px;
-        top: 14px;
+        left: -18px;
+        bottom: 10px;
         font-size: 1.25rem;
-        transform-origin: bottom left;
+        transform-origin: bottom right;
         animation: armWaveMotion 1.4s ease-in-out infinite;
     }
 
     /* Floating Action Buttons Dock */
-    @keyframes fabHoverDock {
-        0%, 100% { transform: translateY(0); }
-        50% { transform: translateY(-5px); }
-    }
     .floating-fab-dock {
         position: fixed;
         left: 20px;
-        bottom: 22px;
-        z-index: 999999;
+        bottom: 20px;
+        z-index: 999990;
         display: flex;
-        flex-direction: row;
-        gap: 10px;
-        animation: fabHoverDock 4s ease-in-out infinite;
+        gap: 8px;
+        background: rgba(15, 23, 42, 0.85);
+        backdrop-filter: blur(12px);
+        padding: 8px 12px;
+        border-radius: 30px;
+        border: 1px solid rgba(56, 189, 248, 0.3);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
     }
     .fab-icon-btn {
-        width: 42px;
-        height: 42px;
+        width: 38px;
+        height: 38px;
         border-radius: 50%;
-        background: linear-gradient(135deg, #1e293b, #090e1a);
-        border: 1.5px solid #38bdf8;
-        color: #38bdf8 !important;
-        text-decoration: none !important;
+        background: #1e293b;
+        border: 1px solid #38bdf8;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 1.15rem;
-        box-shadow: 0 4px 16px rgba(56, 189, 248, 0.3);
+        font-size: 1rem;
         transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
         cursor: pointer;
     }
@@ -661,7 +671,7 @@ st.markdown(
     <div class="floating-fab-dock">
         <div class="fab-icon-btn" title="AI Verification Shield Active" style="border-color: #10b981;">🛡️</div>
         <div class="fab-icon-btn" title="Press Enter ↵ to Search" style="border-color: #38bdf8;">⚡</div>
-        <div class="fab-icon-btn" title="100% Vector Provenance" style="border-color: #818cf8;">📑</div>
+        <div class="fab-icon-btn" title="PatronusAI Benchmark Loaded" style="border-color: #818cf8;">🏛️</div>
     </div>
     """,
     unsafe_allow_html=True,
@@ -674,6 +684,12 @@ def get_global_vector_store() -> VectorStoreManager:
     return VectorStoreManager(model_name=EMBEDDING_MODEL_NAME)
 
 
+@st.cache_resource(show_spinner=False)
+def get_financebench_dataset() -> FinanceBenchDataset:
+    """Caches the PatronusAI/financebench dataset."""
+    return FinanceBenchDataset()
+
+
 def initialize_session_state():
     """Initializes persistent session state variables."""
     if "rag_app" not in st.session_state:
@@ -683,15 +699,31 @@ def initialize_session_state():
         st.session_state.ingested_documents = []
     if "total_chunks_indexed" not in st.session_state:
         st.session_state.total_chunks_indexed = 0
-    if "last_query_result" not in st.session_state:
-        st.session_state.last_query_result = None
-    if "sample_pdf_created" not in st.session_state:
-        st.session_state.sample_pdf_created = False
+    if "last_custom_query_result" not in st.session_state:
+        st.session_state.last_custom_query_result = None
+    if "last_benchmark_result" not in st.session_state:
+        st.session_state.last_benchmark_result = None
+    if "input_query_text" not in st.session_state:
+        st.session_state.input_query_text = ""
+    if "benchmark_company_idx" not in st.session_state:
+        st.session_state.benchmark_company_idx = 0
+    if "benchmark_question_idx" not in st.session_state:
+        st.session_state.benchmark_question_idx = 0
 
 
 initialize_session_state()
 rag_app: FinVerifyRAG = st.session_state.rag_app
 vector_store: VectorStoreManager = rag_app.vector_store
+financebench = get_financebench_dataset()
+all_companies = financebench.get_companies()
+
+# Auto-index initial benchmark filing (e.g. 3M) if vector store is empty on launch
+if vector_store.total_chunks == 0 and all_companies:
+    default_chunks = financebench.extract_chunks(company="3M")
+    if default_chunks:
+        vector_store.add_chunks(default_chunks)
+        st.session_state.ingested_documents.extend(list(dict.fromkeys(c.document_name for c in default_chunks)))
+        st.session_state.total_chunks_indexed = vector_store.total_chunks
 
 # ==========================================
 # SIDEBAR: Ingestion & Model Configuration
@@ -787,12 +819,45 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # Document Ingestion Section
-    st.subheader("📁 Document Ingestion")
-    st.caption("Upload one or multiple financial PDF reports.")
+    # FinanceBench Benchmark Indexer
+    st.subheader("🏛️ Patronus FinanceBench")
+    st.caption("Benchmark dataset: 150 SEC questions across 32 companies.")
 
+    selected_sidebar_company = st.selectbox(
+        "Select Company to Index",
+        options=all_companies if all_companies else ["3M", "Amazon", "Microsoft"],
+        index=0,
+    )
+
+    col_fb1, col_fb2 = st.columns(2)
+    with col_fb1:
+        if st.button("📥 Index Company", use_container_width=True, help="Index SEC filings for selected company"):
+            with st.spinner(f"Indexing SEC filings for {selected_sidebar_company}..."):
+                fb_chunks = financebench.extract_chunks(company=selected_sidebar_company)
+                added = vector_store.add_chunks(fb_chunks)
+                st.session_state.ingested_documents.extend([c.document_name for c in fb_chunks])
+                st.session_state.ingested_documents = list(dict.fromkeys(st.session_state.ingested_documents))
+                st.session_state.total_chunks_indexed = vector_store.total_chunks
+            st.success(f"Added {added} chunks for {selected_sidebar_company}!")
+            st.rerun()
+
+    with col_fb2:
+        if st.button("🚀 Index All 32", use_container_width=True, help="Index entire FinanceBench SEC filing dataset"):
+            with st.spinner("Extracting & embedding all 32 companies in FinanceBench..."):
+                all_fb_chunks = financebench.extract_chunks()
+                added = vector_store.add_chunks(all_fb_chunks)
+                st.session_state.ingested_documents.extend([c.document_name for c in all_fb_chunks])
+                st.session_state.ingested_documents = list(dict.fromkeys(st.session_state.ingested_documents))
+                st.session_state.total_chunks_indexed = vector_store.total_chunks
+            st.success(f"Indexed all {added} FinanceBench chunks!")
+            st.rerun()
+
+    st.markdown("---")
+
+    # Document Ingestion Section for Custom PDFs
+    st.subheader("📁 Upload Custom Financial PDFs")
     uploaded_files = st.file_uploader(
-        "Choose Financial PDFs",
+        "Upload PDF Filings",
         type=["pdf"],
         accept_multiple_files=True,
         help="Upload 10-K, 10-Q, quarterly earnings, balance sheets, or audit reports.",
@@ -808,7 +873,8 @@ with st.sidebar:
         vector_store.clear()
         st.session_state.ingested_documents = []
         st.session_state.total_chunks_indexed = 0
-        st.session_state.last_query_result = None
+        st.session_state.last_custom_query_result = None
+        st.session_state.last_benchmark_result = None
         st.rerun()
 
     if process_btn and uploaded_files:
@@ -830,67 +896,6 @@ with st.sidebar:
                 st.session_state.total_chunks_indexed = vector_store.total_chunks
             st.success(f"Indexed {added_count} chunks from {len(uploaded_files)} PDF(s) into FAISS!")
             st.rerun()
-
-    st.markdown("---")
-    # Quick Sample Report Loader for Hackathon Demonstrations
-    st.subheader("⚡ Quick Demo Data")
-    load_sample_btn = st.button("📥 Load Sample 10-Q Filing", use_container_width=True)
-    if load_sample_btn:
-        sample_doc_name = "Apex_Financial_Holdings_Q3_2024.pdf"
-        sample_text_p1 = (
-            "Apex Financial Holdings Inc. - Form 10-Q Quarterly Report for Period Ended September 30, 2024.\n"
-            "Item 1. Financial Statements. For the third quarter ended September 30, 2024, Apex Financial Holdings reported "
-            "total net revenue of $142.8 million, representing an increase of 14.2% compared to $125.0 million in Q3 2023. "
-            "Net income for the quarter reached $38.4 million, or $1.42 per diluted common share, compared to $31.1 million, "
-            "or $1.18 per diluted share in the prior year period. Total operating expenses stood at $94.6 million, primarily "
-            "driven by strategic investments in AI-driven compliance technology and algorithmic risk underwriting platforms."
-        )
-        sample_text_p2 = (
-            "Apex Financial Holdings Inc. - Capital Resources & Liquidity Analysis.\n"
-            "As of September 30, 2024, cash, cash equivalents, and marketable securities totaled $412.5 million, compared with "
-            "$380.0 million as of December 31, 2023. Total long-term debt was $185.0 million with a weighted average interest "
-            "rate of 4.85%. On October 15, 2024, the Board of Directors approved a quarterly cash dividend of $0.35 per share, "
-            "payable on November 20, 2024 to shareholders of record as of November 1, 2024. Capital expenditures for the nine "
-            "months ended September 30, 2024 totaled $18.2 million, focused on cybersecurity infrastructure upgrades."
-        )
-        sample_text_p3 = (
-            "Apex Financial Holdings Inc. - Risk Factors and Regulatory Compliance.\n"
-            "Our operations are subject to risks including fluctuating interest rates, foreign exchange rate volatility, and "
-            "strict regulatory compliance oversight under Basel III and Dodd-Frank frameworks. We maintain a Tier 1 Common Equity "
-            "Capital Ratio of 13.8%, well above regulatory minimum requirements. The company does not currently operate in "
-            "cryptocurrency staking or retail consumer mortgage lending."
-        )
-
-        # Ingest directly as chunks
-        from ingest import extract_chunks_from_pdf
-        # Create minimal PDF bytes using pypdf writer
-        from pypdf import PdfWriter
-        writer = PdfWriter()
-        # Add blank pages with annotation or construct DocumentChunk directly
-        c_p1 = DocumentChunk(
-            chunk_id="apex_q3_2024_p1_c1",
-            document_name=sample_doc_name,
-            page_number=1,
-            content=sample_text_p1,
-        )
-        c_p2 = DocumentChunk(
-            chunk_id="apex_q3_2024_p2_c1",
-            document_name=sample_doc_name,
-            page_number=2,
-            content=sample_text_p2,
-        )
-        c_p3 = DocumentChunk(
-            chunk_id="apex_q3_2024_p3_c1",
-            document_name=sample_doc_name,
-            page_number=3,
-            content=sample_text_p3,
-        )
-        vector_store.add_chunks([c_p1, c_p2, c_p3])
-        st.session_state.ingested_documents.append(sample_doc_name)
-        st.session_state.ingested_documents = list(dict.fromkeys(st.session_state.ingested_documents))
-        st.session_state.total_chunks_indexed = vector_store.total_chunks
-        st.success("Loaded Apex Financial Q3 2024 10-Q sample report!")
-        st.rerun()
 
     st.markdown("---")
     st.caption("🔒 **Security & Grounding**: Context chunks are strictly bounded. Zero out-of-document generation.")
@@ -944,38 +949,267 @@ with col4:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# Tabs
-tab_query, tab_docs, tab_guardrails = st.tabs(["🔍 Ask & Verify", "📄 Document Explorer", "🛡️ Guardrail Architecture"])
+# Main Application Tabs
+tab_benchmark, tab_query, tab_docs, tab_guardrails = st.tabs([
+    "🏛️ FinanceBench Benchmark (Patronus AI)",
+    "🔍 Ask & Verify (Custom Q&A)",
+    "📄 Document Explorer",
+    "🛡️ Guardrail Architecture",
+])
 
 # -------------------------------------------------------------
-# TAB 1: Query & Verification
+# TAB 1: PatronusAI FinanceBench Benchmark Hub
+# -------------------------------------------------------------
+with tab_benchmark:
+    st.markdown(
+        """
+        <div style="background: linear-gradient(135deg, #131d35 0%, #1e1b4b 100%); border: 1px solid #4338ca; border-radius: 12px; padding: 18px 22px; margin-bottom: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <span style="font-size: 1.15rem; font-weight: 800; color: #818cf8;">
+                    🏛️ Official Patronus AI / FinanceBench Evaluation Hub
+                </span>
+                <a href="https://huggingface.co/datasets/PatronusAI/financebench" target="_blank" style="text-decoration: none; background: #312e81; color: #c7d2fe; border: 1px solid #6366f1; padding: 5px 12px; border-radius: 8px; font-size: 0.78rem; font-weight: 700;">
+                    🤗 Hugging Face Dataset
+                </a>
+            </div>
+            <div style="font-size: 0.92rem; color: #cbd5e1; line-height: 1.55;">
+                Evaluate FinVerify AI against <b>PatronusAI/financebench</b>, the gold standard for SEC filing accuracy.
+                Select any of the <b>32 premier companies</b>, choose a benchmark query, and inspect side-by-side verification against ground truth SEC disclosures.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # Company & Question Selection
+    sel_col1, sel_col2 = st.columns([1, 2])
+    with sel_col1:
+        chosen_company = st.selectbox(
+            "Select Benchmark Company:",
+            options=all_companies if all_companies else ["3M"],
+            key="fb_company_select",
+        )
+
+    company_records = financebench.get_records_by_company(chosen_company)
+    
+    with sel_col2:
+        if company_records:
+            question_labels = [f"Q{i+1}: {r['question'][:90]}..." for i, r in enumerate(company_records)]
+            selected_q_idx = st.selectbox(
+                f"Benchmark Questions for {chosen_company} ({len(company_records)} available):",
+                range(len(company_records)),
+                format_func=lambda i: question_labels[i],
+                key="fb_q_select",
+            )
+            active_record = company_records[selected_q_idx]
+        else:
+            st.warning(f"No records found for {chosen_company}")
+            active_record = None
+
+    if active_record:
+        # Benchmark Question Details Card
+        doc_badge = active_record.get("doc_name", "SEC Filing")
+        q_type_badge = active_record.get("question_type", "Financial Analysis")
+        st.markdown(
+            f"""
+            <div style="background: #0f172a; border: 1px solid #334155; border-radius: 10px; padding: 14px 18px; margin: 12px 0;">
+                <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+                    <span class="citation-tag" style="background: #1e293b; color: #38bdf8; border-color: #0284c7;">📄 SEC Filing: <b>{doc_badge}</b></span>
+                    <span class="citation-tag" style="background: #1e293b; color: #a78bfa; border-color: #7c3aed;">🏷️ Type: <b>{q_type_badge}</b></span>
+                    <span class="citation-tag" style="background: #1e293b; color: #34d399; border-color: #059669;">🏢 Company: <b>{chosen_company}</b></span>
+                </div>
+                <div style="font-size: 1.08rem; color: #f8fafc; font-weight: 600; line-height: 1.5;">
+                    "{active_record['question']}"
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        col_run1, col_run2 = st.columns([1.5, 3.5])
+        with col_run1:
+            run_bench_btn = st.button(
+                "⚡ Verify Against SEC Filing (Patronus Benchmark)",
+                type="primary",
+                use_container_width=True,
+                key="run_bench_btn",
+            )
+
+        if run_bench_btn:
+            # 1. Ensure this company's chunks are indexed in FAISS
+            comp_chunks = financebench.extract_chunks(company=chosen_company)
+            existing_doc_names = set(c.document_name for c in vector_store.chunks)
+            needed_chunks = [c for c in comp_chunks if c.document_name not in existing_doc_names]
+            if needed_chunks:
+                vector_store.add_chunks(needed_chunks)
+                st.session_state.ingested_documents.extend([c.document_name for c in needed_chunks])
+                st.session_state.ingested_documents = list(dict.fromkeys(st.session_state.ingested_documents))
+                st.session_state.total_chunks_indexed = vector_store.total_chunks
+
+            # 2. Run grounded RAG query with company filter
+            with st.spinner(f"Retrieving top SEC evidence chunks for {chosen_company} & verifying with Guardrail..."):
+                t_start = time.time()
+                llm = LLMGenerator(
+                    provider=active_provider,
+                    gemini_api_key=gemini_key,
+                    groq_api_key=groq_key,
+                    model_name=model_name,
+                )
+                b_res = rag_app.query(
+                    question=active_record["question"],
+                    llm_generator=llm,
+                    top_k=5,
+                    company_filter=chosen_company,
+                )
+                t_elapsed = time.time() - t_start
+                b_res["latency_sec"] = round(t_elapsed, 2)
+                b_res["record"] = active_record
+                st.session_state.last_benchmark_result = b_res
+
+        # Render Benchmark Results
+        if st.session_state.last_benchmark_result:
+            b_res = st.session_state.last_benchmark_result
+            rec = b_res.get("record", active_record)
+            conf_level = b_res["confidence_level"]
+            is_suff = b_res["is_sufficient"]
+
+            st.markdown("---")
+            st.markdown("### 📊 Benchmark Comparison: FinVerify AI vs Patronus AI Ground Truth")
+
+            # Side-by-Side Comparison Grid
+            c_left, c_right = st.columns(2, gap="medium")
+
+            with c_left:
+                badge_html = {
+                    "High": '<span class="confidence-badge-high">🟢 High Confidence</span>',
+                    "Medium": '<span class="confidence-badge-medium">🟡 Medium Confidence</span>',
+                    "Insufficient Evidence": '<span class="confidence-badge-insufficient">🔴 Insufficient Evidence</span>',
+                }.get(conf_level, '<span class="confidence-badge-medium">Verified</span>')
+
+                st.markdown(
+                    f"""
+                    <div class="benchmark-compare-box" style="border-left: 4px solid #38bdf8;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                            <span style="font-size: 1rem; font-weight: 800; color: #38bdf8;">
+                                🤖 FinVerify AI Grounded Output
+                            </span>
+                            {badge_html}
+                        </div>
+                        <div style="font-size: 1.05rem; color: #f8fafc; line-height: 1.65; margin-bottom: 16px; white-space: normal !important;">
+                            {b_res['answer']}
+                        </div>
+                        <div style="display: flex; flex-wrap: wrap; gap: 8px; font-size: 0.8rem; color: #94a3b8; border-top: 1px solid #334155; padding-top: 10px;">
+                            <span>Top Similarity: <b style="color: #38bdf8;">{b_res['top_similarity']:.2f}</b></span>
+                            <span>•</span>
+                            <span>Keyword Overlap: <b style="color: #34d399;">{b_res['keyword_overlap_ratio']:.1%}</b></span>
+                            <span>•</span>
+                            <span>Latency: <b>{b_res.get('latency_sec', 0.8)}s</b></span>
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+            with c_right:
+                gt_answer = rec.get("answer", "N/A")
+                gt_justification = rec.get("justification", "N/A")
+                st.markdown(
+                    f"""
+                    <div class="benchmark-compare-box" style="border-left: 4px solid #10b981;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                            <span style="font-size: 1rem; font-weight: 800; color: #34d399;">
+                                🎯 Patronus AI Ground Truth
+                            </span>
+                            <span class="citation-tag" style="background: rgba(16, 185, 129, 0.15); border-color: #10b981; color: #34d399;">
+                                Official Benchmark Answer
+                            </span>
+                        </div>
+                        <div style="font-size: 1.25rem; font-weight: 800; color: #34d399; margin-bottom: 12px; font-family: monospace;">
+                            {gt_answer}
+                        </div>
+                        <div style="font-size: 0.88rem; color: #cbd5e1; line-height: 1.6; background: #090e1a; padding: 12px 14px; border-radius: 8px; border: 1px solid #1e293b;">
+                            <b style="color: #818cf8;">Auditor Justification:</b> {gt_justification}
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+            # Grounded Citations
+            st.markdown("#### 📑 Retrieved Provenance Citations from SEC Filing")
+            b_cites = b_res.get("citations", [])
+            if b_cites:
+                cols_per_row = 2
+                for row_start in range(0, len(b_cites), cols_per_row):
+                    row_items = b_cites[row_start : row_start + cols_per_row]
+                    c_cols = st.columns(cols_per_row, gap="medium")
+                    for c_idx, cite in enumerate(row_items):
+                        clean_snippet = " ".join(str(cite.get('content_preview', '')).split())
+                        with c_cols[c_idx]:
+                            st.markdown(
+                                f"""
+                                <div class="citation-grid-card">
+                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                        <span class="citation-tag" style="background: linear-gradient(90deg, #0284c7, #0369a1); color: #ffffff; font-weight: bold; border: none;">
+                                            ⚡ Relevance: {cite['similarity_pct']}
+                                        </span>
+                                        <span style="font-size: 0.8rem; color: #38bdf8; font-weight: 600;">
+                                            Rank #{row_start + c_idx + 1}
+                                        </span>
+                                    </div>
+                                    <div style="margin-bottom: 8px; display: flex; flex-wrap: wrap; gap: 6px;">
+                                        <span class="citation-tag">📄 <b>{cite['document_name']}</b></span>
+                                        <span class="citation-tag">SEC Page <b>{cite['page_number']}</b></span>
+                                        <span class="citation-tag" style="font-family: monospace; color: #94a3b8;">ID: {cite['chunk_id']}</span>
+                                    </div>
+                                    <div class="citation-snippet">
+                                        "{clean_snippet}"
+                                    </div>
+                                </div>
+                                """,
+                                unsafe_allow_html=True,
+                            )
+
+            # Raw Context Expander
+            with st.expander("🔍 Inspect Full Retrieved Context Chunks (Raw FAISS Embeddings)", expanded=False):
+                for i, c_dict in enumerate(b_res["retrieved_chunks"]):
+                    st.markdown(f"**Chunk {i+1}** — `{c_dict['chunk_id']}` (Page {c_dict['page_number']} of `{c_dict['document_name']}`)")
+                    st.text_area(
+                        f"Chunk {i+1} Raw Text",
+                        value=c_dict["content"],
+                        height=100,
+                        key=f"bench_chunk_txt_{i}",
+                        disabled=True,
+                    )
+
+
+# -------------------------------------------------------------
+# TAB 2: Custom Document Q&A & Verification
 # -------------------------------------------------------------
 with tab_query:
     st.markdown("#### Enter Financial Question")
+    st.caption("Ask questions against uploaded PDFs or indexed SEC filings. Responses are strictly grounded.")
 
-    # Sample query chips for instant hackathon demonstration
+    # Sample query chips for instant demonstration
     st.caption("💡 Quick Test Prompts (Click to test):")
     chip_col1, chip_col2, chip_col3 = st.columns(3)
     
-    if "input_query_text" not in st.session_state:
-        st.session_state.input_query_text = ""
-    
     chip_clicked = False
     with chip_col1:
-        if st.button("📊 Answerable: Total Revenue in Q3 2024?", use_container_width=True):
-            st.session_state.input_query_text = "What was the total net revenue reported for Q3 2024, and how much did it increase compared to Q3 2023?"
+        if st.button("📊 3M FY2018 Capex Amount?", use_container_width=True):
+            st.session_state.input_query_text = "What is the FY2018 capital expenditure amount (in USD millions) for 3M from the cash flow statement?"
             chip_clicked = True
     with chip_col2:
-        if st.button("💰 Answerable: Quarterly Dividend?", use_container_width=True):
-            st.session_state.input_query_text = "What was the quarterly cash dividend approved per share, and when is it payable?"
+        if st.button("💰 Amazon Restricted Cash?", use_container_width=True):
+            st.session_state.input_query_text = "Does Amazon have any restricted cash or cash equivalents reported in its financial statements?"
             chip_clicked = True
     with chip_col3:
         if st.button("❌ Unanswerable: Forecast for 2029?", use_container_width=True):
-            st.session_state.input_query_text = "What are the projected revenue figures and market share targets for the year 2029?"
+            st.session_state.input_query_text = "What are the projected revenue figures, stock price targets, and market share projections for the fiscal year 2029?"
             chip_clicked = True
 
     # Enter key submission enabled via st.form
-    with st.form(key="financial_qa_form", clear_on_submit=False):
+    with st.form(key="custom_financial_qa_form", clear_on_submit=False):
         user_query = st.text_input(
             "Enter Financial Question (Press Enter ↵ to Answer):",
             value=st.session_state.input_query_text,
@@ -996,7 +1230,7 @@ with tab_query:
 
     if target_query:
         if vector_store.total_chunks == 0:
-            st.warning("⚠️ No documents uploaded yet! Please upload PDF files in the sidebar or click 'Load Sample 10-Q Filing'.")
+            st.warning("⚠️ No documents in FAISS yet! Index a company from the benchmark tab, upload PDFs in the sidebar, or click 'Index All 32'.")
         else:
             with st.spinner("Retrieving top 5 FAISS chunks & evaluating evidence sufficiency..."):
                 llm = LLMGenerator(
@@ -1006,20 +1240,19 @@ with tab_query:
                     model_name=model_name,
                 )
                 result = rag_app.query(target_query, llm_generator=llm, top_k=5)
-                st.session_state.last_query_result = result
+                st.session_state.last_custom_query_result = result
 
     # Display Query Results in a Wide, Horizontal Futuristic Dashboard
-    if st.session_state.last_query_result:
-        res = st.session_state.last_query_result
+    if st.session_state.last_custom_query_result:
+        res = st.session_state.last_custom_query_result
         conf_level = res["confidence_level"]
         is_suff = res["is_sufficient"]
 
         st.markdown("---")
         
-        # 1. Verified Answer Section (Full Width, Glowing Cyber Container)
+        # 1. Verified Answer Section
         st.markdown("### 📝 Verified Financial Answer")
         
-        # Question & Badge Header
         badge_html = {
             "High": '<span class="confidence-badge-high">🟢 High Confidence</span>',
             "Medium": '<span class="confidence-badge-medium">🟡 Medium Confidence</span>',
@@ -1094,7 +1327,6 @@ with tab_query:
                 row_cites = cite_list[row_start : row_start + cols_per_row]
                 grid_cols = st.columns(cols_per_row, gap="medium")
                 for c_idx, cite in enumerate(row_cites):
-                    # Strip any newlines and multi-spaces to guarantee 100% continuous horizontal prose
                     raw_txt = str(cite.get('content_preview', ''))
                     clean_snippet = " ".join(raw_txt.split())
                     with grid_cols[c_idx]:
@@ -1139,12 +1371,12 @@ with tab_query:
 
 
 # -------------------------------------------------------------
-# TAB 2: Document Explorer
+# TAB 3: Document Explorer
 # -------------------------------------------------------------
 with tab_docs:
     st.markdown("#### 📚 Indexed Documents & Chunks")
     if vector_store.total_chunks == 0:
-        st.info("No documents indexed yet. Use the sidebar to upload financial PDFs.")
+        st.info("No documents indexed yet. Use the benchmark tab or sidebar to index financial filings.")
     else:
         st.write(f"**Total Indexed Documents:** {len(vector_store.unique_documents)}")
         st.write(f"**Total Vector Embeddings:** {vector_store.total_chunks}")
@@ -1153,37 +1385,42 @@ with tab_docs:
             doc_chunks = [c for c in vector_store.chunks if c.document_name == doc_name]
             with st.expander(f"📄 {doc_name} ({len(doc_chunks)} chunks)", expanded=False):
                 for c in doc_chunks:
+                    clean_c = " ".join(c.content.split())
                     st.markdown(f"- **Chunk ID:** `{c.chunk_id}` | **Page:** {c.page_number} | **Length:** {len(c.content)} chars")
-                    st.caption(c.content[:250] + ("..." if len(c.content) > 250 else ""))
+                    st.caption(clean_c[:250] + ("..." if len(clean_c) > 250 else ""))
 
 
 # -------------------------------------------------------------
-# TAB 3: Guardrail Architecture
+# TAB 4: Guardrail Architecture
 # -------------------------------------------------------------
 with tab_guardrails:
     st.markdown("#### 🛡️ FinVerify AI Anti-Hallucination Architecture")
     st.markdown(
         """
-        FinVerify AI employs a **multi-tiered verification pipeline** specifically calibrated for high-stakes financial auditing:
+        FinVerify AI employs a **multi-tiered verification pipeline** calibrated for high-stakes financial auditing:
 
-        1. **Deterministic PDF Ingestion & Provenance Tracking (`ingest.py`)**:
-           - Extracts text page-by-page using `pypdf`.
+        1. **PatronusAI/financebench Integration**:
+           - Seamlessly tests against 150 real questions and SEC disclosures across 32 premier companies.
+           - Directly benchmarks RAG outputs against gold-standard auditor ground-truth answers and justifications.
+
+        2. **Deterministic PDF & Table Ingestion (`ingest.py` & `financebench.py`)**:
+           - Extracts text and tabular disclosures page-by-page.
+           - Normalizes whitespace and un-wraps fragmented lines to guarantee horizontal prose.
            - Preserves immutable provenance metadata: `document_name`, `page_number`, and unique `chunk_id`.
-           - Recursive chunking with 700 character boundaries and 120 character overlap to avoid semantic fragmentation.
 
-        2. **Local Vector Search (`rag.py`)**:
+        3. **Local Vector Search (`rag.py`)**:
            - Encodes text locally via `sentence-transformers` (`all-MiniLM-L6-v2`, 384 dimensions).
            - Executes fast Cosine Similarity retrieval using `FAISS` (`IndexFlatIP` with normalized vectors).
-           - Gathers exactly the top 5 most relevant excerpts.
+           - Gathers exactly the top 5 most relevant excerpts with optional company filtering.
 
-        3. **Dual-Layer Evidence Sufficiency Guardrail (`guardrail.py`)**:
+        4. **Dual-Layer Evidence Sufficiency Guardrail (`guardrail.py`)**:
            - **Layer 1: Semantic Cosine Thresholds**: Rejects retrieval results where top chunk similarity < 0.38.
            - **Layer 2: Lexical Entity & Financial Keyword Overlap**: Verifies that specific financial terms, figures, and entities from the query appear in the retrieved context.
            - **Layer 3: Exact Fallback Enforcement**: If evidence is insufficient, immediately emits:
              `"I don't know based on the provided documents."`
 
-        4. **Grounded Generation Step**:
-           - LLM (Gemini or Groq) receives ONLY retrieved context with strict system instructions prohibiting outside knowledge or extrapolation.
-           - If the model generates hesitation or fails factual grounding, the guardrail intercepts and substitutes the exact fallback string.
+        5. **Grounded Generation Step**:
+           - LLM (Gemini or Groq) receives ONLY retrieved context with strict system instructions prohibiting outside knowledge.
+           - If the model hesitates or fails factual grounding, the guardrail intercepts and substitutes the exact fallback string.
         """
     )

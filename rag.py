@@ -55,27 +55,44 @@ class VectorStoreManager:
         self.chunks.extend(new_chunks)
         return len(new_chunks)
 
-    def search(self, query: str, top_k: int = 5) -> List[Tuple[DocumentChunk, float]]:
+    def search(
+        self,
+        query: str,
+        top_k: int = 5,
+        company_filter: Optional[str] = None,
+        doc_filter: Optional[str] = None,
+    ) -> List[Tuple[DocumentChunk, float]]:
         """
         Retrieves top_k most relevant chunks using cosine similarity.
+        Optionally filters by company name or document name.
         Returns list of (DocumentChunk, similarity_score).
         """
         if self.index.ntotal == 0 or not self.chunks:
             return []
 
-        actual_k = min(top_k, self.index.ntotal)
+        # Retrieve a broader candidate pool if filtering
+        candidate_k = min(self.index.ntotal, max(top_k * 4, 30)) if (company_filter or doc_filter) else min(top_k, self.index.ntotal)
         query_embedding = self.model.encode(
             [query],
             normalize_embeddings=True,
         )
         query_np = np.ascontiguousarray(query_embedding, dtype=np.float32)
 
-        scores, indices = self.index.search(query_np, actual_k)
+        scores, indices = self.index.search(query_np, candidate_k)
 
         results: List[Tuple[DocumentChunk, float]] = []
         for score, idx in zip(scores[0], indices[0]):
             if 0 <= idx < len(self.chunks):
-                results.append((self.chunks[idx], float(score)))
+                chunk = self.chunks[idx]
+                # Apply optional company filter
+                if company_filter and chunk.metadata.get("company", "").lower() != company_filter.lower():
+                    continue
+                # Apply optional doc filter
+                if doc_filter and chunk.document_name.lower() != doc_filter.lower():
+                    continue
+                results.append((chunk, float(score)))
+                if len(results) >= top_k:
+                    break
 
         return results
 
@@ -262,17 +279,24 @@ class FinVerifyRAG:
         question: str,
         llm_generator: LLMGenerator,
         top_k: int = 5,
+        company_filter: Optional[str] = None,
+        doc_filter: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Executes end-to-end RAG pipeline:
-        1. Retrieve top 5 most relevant chunks.
+        1. Retrieve top 5 most relevant chunks (with optional company/doc filter).
         2. Evaluate evidence sufficiency with FinancialGuardrail.
         3. If insufficient: return exact fallback string.
         4. If sufficient: pass context to LLM.
         5. Build citation objects.
         """
         # Step 1: Retrieve top-k chunks
-        retrieved_items = self.vector_store.search(question, top_k=top_k)
+        retrieved_items = self.vector_store.search(
+            question,
+            top_k=top_k,
+            company_filter=company_filter,
+            doc_filter=doc_filter,
+        )
         retrieved_chunks = [item[0] for item in retrieved_items]
         similarity_scores = [item[1] for item in retrieved_items]
         contents = [c.content for c in retrieved_chunks]

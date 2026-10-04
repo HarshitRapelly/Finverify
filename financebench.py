@@ -72,10 +72,16 @@ class FinanceBenchDataset:
                 return r
         return None
 
-    def extract_chunks(self, company: Optional[str] = None, chunk_size: int = 700, chunk_overlap: int = 120) -> List[DocumentChunk]:
+    def extract_chunks(
+        self,
+        company: Optional[str] = None,
+        chunk_size: int = 1800,
+        chunk_overlap: int = 200,
+    ) -> List[DocumentChunk]:
         """
         Extracts all SEC filing evidence from FinanceBench records and converts
-        them into DocumentChunk objects with provenance metadata.
+        them into DocumentChunk objects with provenance metadata and horizontal text.
+        Preserves intact financial statements without table fragmentation.
         """
         chunker = RecursiveTextChunker(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
         chunks: List[DocumentChunk] = []
@@ -94,6 +100,8 @@ class FinanceBenchDataset:
 
             fb_id = rec.get("financebench_id", "")
             gt_answer = rec.get("answer", "")
+            justification = rec.get("justification", "")
+            q_type = rec.get("question_type", "")
             evidence_list = rec.get("evidence", [])
 
             for ev in evidence_list:
@@ -108,28 +116,37 @@ class FinanceBenchDataset:
                     continue
 
                 # Deduplicate evidence blocks across questions
-                ev_hash = hash((doc_name, page_num, cleaned[:100]))
+                ev_hash = hash((doc_name, page_num, cleaned[:120]))
                 if ev_hash in seen_evidence_hashes:
                     continue
                 seen_evidence_hashes.add(ev_hash)
 
                 doc_slug = re.sub(r"[^\w\-.]", "_", doc_name.lower().replace(".pdf", ""))
-                sub_chunks = chunker.split_text(cleaned)
+                
+                # If evidence block is under chunk_size, keep as single intact statement
+                if len(cleaned) <= chunk_size:
+                    sub_chunks = [cleaned]
+                else:
+                    sub_chunks = chunker.split_text(cleaned)
 
                 for c_idx, c_text in enumerate(sub_chunks):
-                    # Clean horizontal text
+                    # Clean continuous horizontal text (no vertical wrap)
                     c_clean = " ".join(c_text.split())
                     chunk_id = f"{doc_slug}_p{page_num}_c{c_idx+1}"
+                    header = f"[{comp_name} | SEC Filing: {doc_name} | Page {page_num}] "
+                    
                     chunks.append(
                         DocumentChunk(
                             chunk_id=chunk_id,
                             document_name=doc_file_name,
                             page_number=page_num,
-                            content=c_clean,
+                            content=header + c_clean,
                             metadata={
                                 "company": comp_name,
                                 "financebench_id": fb_id,
                                 "ground_truth_answer": gt_answer,
+                                "justification": justification,
+                                "question_type": q_type,
                                 "doc_type": rec.get("doc_type", "SEC 10-K"),
                                 "doc_period": rec.get("doc_period", ""),
                             },

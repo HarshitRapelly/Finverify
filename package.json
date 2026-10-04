@@ -1,0 +1,9 @@
+{
+  "name": "finverify-ai",
+  "version": "1.0.0",
+  "description": "FinVerify AI - Hallucination-Resistant Financial Document Intelligence with PatronusAI/financebench",
+  "scripts": {
+    "dev": ".\\.venv\\Scripts\\streamlit run app.py",
+    "start": ".\\.venv\\Scripts\\streamlit run app.py"
+  }
+}
